@@ -77,7 +77,7 @@ func TestRequestTrailerValuesNotForwardedToBackend(t *testing.T) {
 			if test.buffered {
 				next, err = retry.New(context.Background(), lb,
 					dynamic.Retry{Attempts: 2, Status: []string{"500-599"}, RetryNonIdempotentMethod: true},
-					retry.Listeners{}, "retry")
+					retry.Listeners{}, "retry", nil)
 				require.NoError(t, err)
 			}
 

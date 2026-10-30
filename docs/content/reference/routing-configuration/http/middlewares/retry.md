@@ -25,6 +25,9 @@ http:
           - "500-599"
         disableRetryOnNetworkError: true
         retryNonIdempotentMethod: true
+        budget:
+          percentage: 10
+          minTokens: 10
 ```
 
 ```toml tab="Structured (TOML)"
@@ -38,6 +41,9 @@ http:
     status = ["400","500-599"]
     disableRetryOnNetworkError = true
     retryNonIdempotentMethod = true
+    [http.middlewares.test-retry.retry.budget]
+      percentage = 10
+      minTokens = 10
 ```
 
 ```yaml tab="Labels"
@@ -100,6 +106,27 @@ spec:
 | <a id="opt-status" href="#opt-status" title="#opt-status">`status`</a> | Defines the range of HTTP status codes to retry on. <br/>More information [here](#disableretryonnetworkerror-and-status). | [] | No |
 | <a id="opt-disableRetryOnNetworkError" href="#opt-disableRetryOnNetworkError" title="#opt-disableRetryOnNetworkError">`disableRetryOnNetworkError`</a> | This option disables the retry if an error occurs when transmitting the request to the server. <br/>More information [here](#disableretryonnetworkerror-and-status).  | false | No |
 | <a id="opt-retryNonIdempotentMethod" href="#opt-retryNonIdempotentMethod" title="#opt-retryNonIdempotentMethod">`retryNonIdempotentMethod`</a> | Activates the retry for non-idempotent methods (`POST`, `LOCK`, `PATCH`) | false | No |
+| <a id="opt-budget-percentage" href="#opt-budget-percentage" title="#opt-budget-percentage">`budget.percentage`</a> | Maximum share of concurrent retries, as a percentage of the requests currently handled by the middleware. <br/>Integer between `1` and `100`. <br/>More information [here](#budget). |  | No |
+| <a id="opt-budget-minTokens" href="#opt-budget-minTokens" title="#opt-budget-minTokens">`budget.minTokens`</a> | Minimum number of concurrent retries, regardless of the current load. <br/>Positive integer. <br/>More information [here](#budget). |  | No |
+
+### budget
+
+The optional `budget` option limits the number of requests that are retried concurrently, in order to avoid amplifying the load when several routes share the same retry middleware and their backends fail.
+It is only available from the [file provider](../../other-providers/file.md) (YAML or TOML).
+
+When several routes reference a retry middleware with the same name, they share the same budget. Middlewares with different names get independent budgets, and the budgets are reset when the routing configuration is reloaded.
+
+The budget uses two counters:
+
+- The number of client requests the middleware is currently handling. Each request counts once, from its first attempt (the first attempt is never throttled).
+- The number of those requests currently being retried.
+
+At any time, the maximum number of concurrent retries is the largest of:
+
+- `minTokens`
+- the number of requests currently handled, multiplied by `percentage` and rounded up
+
+A request consumes a token the first time the middleware decides to retry it, and keeps it until the request completes, including during the backoff waits and the response transmission. When no token is left, the middleware does not wait: the response of the current attempt (status code, headers and body) is returned to the client as is. Lowering the limit never interrupts a retry that was already accepted.
 
 ### maxRequestBodyBytes
 

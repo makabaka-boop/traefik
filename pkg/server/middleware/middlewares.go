@@ -53,6 +53,7 @@ type Builder struct {
 	configs        map[string]*runtime.MiddlewareInfo
 	pluginBuilder  PluginsBuilder
 	serviceBuilder serviceBuilder
+	retryBudgets   *retry.BudgetRegistry
 }
 
 type serviceBuilder interface {
@@ -62,7 +63,12 @@ type serviceBuilder interface {
 
 // NewBuilder creates a new Builder.
 func NewBuilder(configs map[string]*runtime.MiddlewareInfo, serviceBuilder serviceBuilder, pluginBuilder PluginsBuilder) *Builder {
-	return &Builder{configs: configs, serviceBuilder: serviceBuilder, pluginBuilder: pluginBuilder}
+	return &Builder{
+		configs:        configs,
+		serviceBuilder: serviceBuilder,
+		pluginBuilder:  pluginBuilder,
+		retryBudgets:   retry.NewBudgetRegistry(),
+	}
 }
 
 // BuildMiddlewareChain creates a middleware chain.
@@ -389,7 +395,7 @@ func (b *Builder) buildConstructor(ctx context.Context, middlewareName string) (
 		}
 		middleware = func(next http.Handler) (http.Handler, error) {
 			// TODO missing metrics / accessLog
-			return retry.New(ctx, next, *config.Retry, retry.Listeners{}, middlewareName)
+			return retry.New(ctx, next, *config.Retry, retry.Listeners{}, middlewareName, b.retryBudgets)
 		}
 	}
 

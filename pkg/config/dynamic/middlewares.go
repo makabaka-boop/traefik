@@ -767,6 +767,20 @@ type ReplacePathRegex struct {
 
 // +k8s:deepcopy-gen=true
 
+// RetryBudget limits the number of requests that can be retried concurrently.
+// It is only available through the file provider.
+type RetryBudget struct {
+	// Percentage defines the maximum share of concurrent retries,
+	// as a percentage of the client requests currently handled by the middleware.
+	// The value must be an integer between 1 and 100.
+	Percentage int `json:"percentage,omitempty" toml:"percentage,omitempty" yaml:"percentage,omitempty" label:"-" kv:"-" export:"true"`
+	// MinTokens defines the minimum number of concurrent retries, regardless of the current load.
+	// The value must be a positive integer.
+	MinTokens int `json:"minTokens,omitempty" toml:"minTokens,omitempty" yaml:"minTokens,omitempty" label:"-" kv:"-" export:"true"`
+}
+
+// +k8s:deepcopy-gen=true
+
 // Retry holds the retry middleware configuration.
 // This middleware reissues requests a given number of times to a backend server if that server does not reply.
 // As soon as the server answers, the middleware stops retrying, regardless of the response status.
@@ -790,6 +804,9 @@ type Retry struct {
 	DisableRetryOnNetworkError bool `json:"disableRetryOnNetworkError,omitempty" toml:"disableRetryOnNetworkError,omitempty" yaml:"disableRetryOnNetworkError,omitempty" export:"true"`
 	// RetryNonIdempotentMethod activates the retry for non-idempotent methods (POST, LOCK, PATCH)
 	RetryNonIdempotentMethod bool `json:"retryNonIdempotentMethod,omitempty" toml:"retryNonIdempotentMethod,omitempty" yaml:"retryNonIdempotentMethod,omitempty" export:"true"`
+	// Budget defines an optional limit on the number of concurrent retries.
+	// When configured, middleware instances with the same name share the same budget.
+	Budget *RetryBudget `json:"budget,omitempty" toml:"budget,omitempty" yaml:"budget,omitempty" label:"-" kv:"-" export:"true"`
 }
 
 func (r *Retry) SetDefaults() {

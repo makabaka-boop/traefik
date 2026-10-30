@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/traefik/paerser/file"
 	"github.com/traefik/traefik/v3/pkg/config/dynamic"
 	"github.com/traefik/traefik/v3/pkg/safe"
 )
@@ -252,6 +253,54 @@ func TestProvideWatchWithNonConfigDanglingSymlink(t *testing.T) {
 		assert.Equal(t, 3, numRouters)
 	case <-timeout:
 		t.Errorf("timeout while waiting for config")
+	}
+}
+
+func TestRetryBudgetDecoding(t *testing.T) {
+	testCases := []struct {
+		desc    string
+		ext     string
+		content string
+	}{
+		{
+			desc: "yaml",
+			ext:  ".yaml",
+			content: `
+http:
+  middlewares:
+    test-retry:
+      retry:
+        attempts: 4
+        budget:
+          percentage: 25
+          minTokens: 10
+`,
+		},
+		{
+			desc: "toml",
+			ext:  ".toml",
+			content: `
+[http.middlewares.test-retry.retry]
+  attempts = 4
+  [http.middlewares.test-retry.retry.budget]
+    percentage = 25
+    minTokens = 10
+`,
+		},
+	}
+
+	for _, test := range testCases {
+		t.Run(test.desc, func(t *testing.T) {
+			configuration := &dynamic.Configuration{HTTP: &dynamic.HTTPConfiguration{}}
+			require.NoError(t, file.DecodeContent(test.content, test.ext, configuration))
+
+			retry := configuration.HTTP.Middlewares["test-retry"].Retry
+			require.NotNil(t, retry)
+			require.NotNil(t, retry.Budget)
+			assert.Equal(t, 4, retry.Attempts)
+			assert.Equal(t, 25, retry.Budget.Percentage)
+			assert.Equal(t, 10, retry.Budget.MinTokens)
+		})
 	}
 }
 

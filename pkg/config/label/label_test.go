@@ -1596,3 +1596,19 @@ func TestEncodeConfiguration(t *testing.T) {
 	}
 	assert.Equal(t, expected, labels)
 }
+
+func TestRetryBudgetNotDecodableFromLabels(t *testing.T) {
+	labels := map[string]string{
+		"traefik.http.middlewares.Middleware0.retry.attempts":          "42",
+		"traefik.http.middlewares.Middleware0.retry.budget.percentage": "50",
+		"traefik.http.middlewares.Middleware0.retry.budget.mintokens":  "10",
+	}
+
+	configuration, err := DecodeConfiguration(labels)
+	require.NoError(t, err)
+
+	retry := configuration.HTTP.Middlewares["Middleware0"].Retry
+	require.NotNil(t, retry)
+	assert.Equal(t, 42, retry.Attempts)
+	assert.Nil(t, retry.Budget, "the retry budget is only available through the file provider")
+}

@@ -85,6 +85,7 @@ type retry struct {
 	initialInterval            time.Duration
 	timeout                    time.Duration
 	retryNonIdempotentMethod   bool
+	budget                     *budget
 
 	next     http.Handler
 	listener Listener
@@ -92,7 +93,9 @@ type retry struct {
 }
 
 // New returns a new retry middleware.
-func New(ctx context.Context, next http.Handler, config dynamic.Retry, listener Listener, name string) (http.Handler, error) {
+// budgets holds the per-name budgets shared by middleware instances within the
+// current dynamic configuration, and may be nil when the middleware has no budget.
+func New(ctx context.Context, next http.Handler, config dynamic.Retry, listener Listener, name string, budgets *BudgetRegistry) (http.Handler, error) {
 	middlewares.GetLogger(ctx, name, typeName).Debug().Msg("Creating middleware")
 
 	if len(config.Status) == 0 && config.DisableRetryOnNetworkError {
@@ -101,6 +104,21 @@ func New(ctx context.Context, next http.Handler, config dynamic.Retry, listener 
 
 	if config.Attempts <= 0 {
 		return nil, fmt.Errorf("incorrect (or empty) value for attempt (%d)", config.Attempts)
+	}
+
+	var b *budget
+	if config.Budget != nil {
+		if config.Budget.Percentage < 1 || config.Budget.Percentage > 100 {
+			return nil, errors.New("budget percentage must be an integer between 1 and 100")
+		}
+		if config.Budget.MinTokens < 1 {
+			return nil, errors.New("budget minTokens must be a positive integer")
+		}
+
+		if budgets == nil {
+			budgets = NewBudgetRegistry()
+		}
+		b = budgets.get(name, *config.Budget)
 	}
 
 	maxRequestBodyBytes := dynamic.RetryDefaultMaxRequestBodyBytes
@@ -115,6 +133,7 @@ func New(ctx context.Context, next http.Handler, config dynamic.Retry, listener 
 		retryNonIdempotentMethod:   config.RetryNonIdempotentMethod,
 		initialInterval:            time.Duration(config.InitialInterval),
 		timeout:                    time.Duration(config.Timeout),
+		budget:                     b,
 		name:                       name,
 		listener:                   listener,
 		next:                       next,
@@ -136,6 +155,31 @@ func (r *retry) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		r.next.ServeHTTP(rw, req)
 		return
 	}
+
+	if r.budget != nil {
+		r.budget.enter()
+		defer r.budget.leave()
+	}
+
+	// retryTokenAcquired reports whether the request holds a retry token.
+	// The token is acquired once, when retrying is decided for the first time,
+	// and is kept until ServeHTTP returns, including while waiting for the
+	// backoff and while the response is transmitted.
+	retryTokenAcquired := false
+	allowRetry := func() bool {
+		if r.budget == nil {
+			return true
+		}
+		if !retryTokenAcquired {
+			retryTokenAcquired = r.budget.tryAcquire()
+		}
+		return retryTokenAcquired
+	}
+	defer func() {
+		if retryTokenAcquired {
+			r.budget.release()
+		}
+	}()
 
 	logger := middlewares.GetLogger(req.Context(), r.name, typeName)
 
@@ -218,7 +262,7 @@ func (r *retry) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			return nil
 		}
 
-		retryResponseWriter := newResponseWriter(rw, statusCodes, start, r.timeout, r.disableRetryOnNetworkError)
+		retryResponseWriter := newResponseWriter(rw, statusCodes, start, r.timeout, r.disableRetryOnNetworkError, allowRetry)
 
 		retryReq := req
 		if !r.disableRetryOnNetworkError {
@@ -274,7 +318,7 @@ func (r *retry) newBackOff() backoff.BackOff {
 	return b
 }
 
-func newResponseWriter(rw http.ResponseWriter, statusCodeRanges types.HTTPCodeRanges, start time.Time, timeout time.Duration, disableRetryOnNetworkError bool) *responseWriter {
+func newResponseWriter(rw http.ResponseWriter, statusCodeRanges types.HTTPCodeRanges, start time.Time, timeout time.Duration, disableRetryOnNetworkError bool, allowRetry func() bool) *responseWriter {
 	return &responseWriter{
 		responseWriter:             rw,
 		headers:                    make(http.Header),
@@ -282,6 +326,7 @@ func newResponseWriter(rw http.ResponseWriter, statusCodeRanges types.HTTPCodeRa
 		start:                      start,
 		timeout:                    timeout,
 		disableRetryOnNetworkError: disableRetryOnNetworkError,
+		allowRetry:                 allowRetry,
 	}
 }
 
@@ -293,6 +338,10 @@ type responseWriter struct {
 	statusCodeRange            types.HTTPCodeRanges
 	start                      time.Time
 	timeout                    time.Duration
+
+	// allowRetry reports whether a retry token is available for the request.
+	// It is nil when no budget is configured, in which case retries are always allowed.
+	allowRetry func() bool
 
 	proxyReached   atomic.Bool
 	wroteRequest   atomic.Bool
@@ -330,7 +379,8 @@ func (r *responseWriter) WriteHeader(code int) {
 	// Retry on a network error only when the request reached the backend proxy
 	// but no bytes were sent to the backend yet. Responses produced before reaching the
 	// proxy (e.g. an auth middleware returning 401) must flow through to the client.
-	if !timedOut && !r.disableRetryOnNetworkError && r.proxyReached.Load() && !r.wroteRequest.Load() {
+	// When the retry budget has no token left, the response flows through as well.
+	if !timedOut && !r.disableRetryOnNetworkError && r.proxyReached.Load() && !r.wroteRequest.Load() && r.canRetry() {
 		r.shouldNotWrite = true
 		return
 	}
@@ -346,8 +396,9 @@ func (r *responseWriter) WriteHeader(code int) {
 		return
 	}
 
-	if r.statusCodeRange != nil {
-		r.shouldNotWrite = !timedOut && r.statusCodeRange.Contains(code)
+	// When the retry budget has no token left, the current attempt is returned as is.
+	if !timedOut && r.statusCodeRange != nil && r.statusCodeRange.Contains(code) && r.canRetry() {
+		r.shouldNotWrite = true
 	}
 
 	if r.shouldNotWrite {
@@ -396,6 +447,12 @@ func (r *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 // Unwrap exposes the underlying ResponseWriter for http.ResponseController.
 func (r *responseWriter) Unwrap() http.ResponseWriter {
 	return r.responseWriter
+}
+
+// canRetry reports whether suppressing the current response to retry is allowed.
+// Without a configured budget retries are always allowed.
+func (r *responseWriter) canRetry() bool {
+	return r.allowRetry == nil || r.allowRetry()
 }
 
 type peekedBody struct {

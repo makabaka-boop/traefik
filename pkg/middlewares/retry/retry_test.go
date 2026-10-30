@@ -125,7 +125,7 @@ func TestRetry(t *testing.T) {
 			})
 
 			retryListener := &countingRetryListener{}
-			retryHandler, err := New(t.Context(), WrapHandler(next), test.config, retryListener, "traefikTest")
+			retryHandler, err := New(t.Context(), WrapHandler(next), test.config, retryListener, "traefikTest", nil)
 			require.NoError(t, err)
 
 			recorder := httptest.NewRecorder()
@@ -150,7 +150,7 @@ func TestRetryEmptyServerList(t *testing.T) {
 	})
 
 	retryListener := &countingRetryListener{}
-	retry, err := New(t.Context(), WrapHandler(next), dynamic.Retry{Attempts: 3}, retryListener, "traefikTest")
+	retry, err := New(t.Context(), WrapHandler(next), dynamic.Retry{Attempts: 3}, retryListener, "traefikTest", nil)
 	require.NoError(t, err)
 
 	recorder := httptest.NewRecorder()
@@ -183,7 +183,7 @@ func TestMultipleRetriesShouldNotLooseHeaders(t *testing.T) {
 		rw.WriteHeader(http.StatusNoContent)
 	})
 
-	retry, err := New(t.Context(), WrapHandler(next), dynamic.Retry{Attempts: 3}, &countingRetryListener{}, "traefikTest")
+	retry, err := New(t.Context(), WrapHandler(next), dynamic.Retry{Attempts: 3}, &countingRetryListener{}, "traefikTest", nil)
 	require.NoError(t, err)
 
 	res := httptest.NewRecorder()
@@ -217,7 +217,7 @@ func TestRetryShouldNotLooseHeadersOnWrite(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	retry, err := New(t.Context(), WrapHandler(next), dynamic.Retry{Attempts: 3}, &countingRetryListener{}, "traefikTest")
+	retry, err := New(t.Context(), WrapHandler(next), dynamic.Retry{Attempts: 3}, &countingRetryListener{}, "traefikTest", nil)
 	require.NoError(t, err)
 
 	res := httptest.NewRecorder()
@@ -238,7 +238,7 @@ func TestRetryShouldNotRetryWhenProxyNotReached(t *testing.T) {
 	})
 
 	retryListener := &countingRetryListener{}
-	retry, err := New(t.Context(), next, dynamic.Retry{Attempts: 3}, retryListener, "traefikTest")
+	retry, err := New(t.Context(), next, dynamic.Retry{Attempts: 3}, retryListener, "traefikTest", nil)
 	require.NoError(t, err)
 
 	recorder := httptest.NewRecorder()
@@ -265,7 +265,7 @@ func TestRetryOnStatusWhenProxyNotReached(t *testing.T) {
 
 	config := dynamic.Retry{Attempts: 3, Status: []string{"503"}, MaxRequestBodyBytes: new(int64(1024))}
 	retryListener := &countingRetryListener{}
-	retry, err := New(t.Context(), next, config, retryListener, "traefikTest")
+	retry, err := New(t.Context(), next, config, retryListener, "traefikTest", nil)
 	require.NoError(t, err)
 
 	recorder := httptest.NewRecorder()
@@ -290,7 +290,7 @@ func TestRetryWithFlush(t *testing.T) {
 		}
 	})
 
-	retry, err := New(t.Context(), next, dynamic.Retry{Attempts: 1}, &countingRetryListener{}, "traefikTest")
+	retry, err := New(t.Context(), next, dynamic.Retry{Attempts: 1}, &countingRetryListener{}, "traefikTest", nil)
 	require.NoError(t, err)
 
 	responseRecorder := httptest.NewRecorder()
@@ -366,7 +366,7 @@ func TestRetryWebsocket(t *testing.T) {
 			})
 
 			retryListener := &countingRetryListener{}
-			retryH, err := New(t.Context(), WrapHandler(next), dynamic.Retry{Attempts: test.maxRequestAttempts}, retryListener, "traefikTest")
+			retryH, err := New(t.Context(), WrapHandler(next), dynamic.Retry{Attempts: test.maxRequestAttempts}, retryListener, "traefikTest", nil)
 			require.NoError(t, err)
 
 			retryServer := httptest.NewServer(retryH)
@@ -399,7 +399,7 @@ func Test1xxResponses(t *testing.T) {
 	})
 
 	retryListener := &countingRetryListener{}
-	retry, err := New(t.Context(), next, dynamic.Retry{Attempts: 1}, retryListener, "traefikTest")
+	retry, err := New(t.Context(), next, dynamic.Retry{Attempts: 1}, retryListener, "traefikTest", nil)
 	require.NoError(t, err)
 
 	server := httptest.NewServer(retry)
@@ -709,7 +709,7 @@ func TestRetryHTTPStatusCodes(t *testing.T) {
 			})
 
 			retryListener := &countingRetryListener{}
-			retry, err := New(t.Context(), WrapHandler(next), test.config, retryListener, "traefikTest")
+			retry, err := New(t.Context(), WrapHandler(next), test.config, retryListener, "traefikTest", nil)
 			require.NoError(t, err)
 
 			recorder := httptest.NewRecorder()
@@ -808,7 +808,7 @@ func TestRetryHTTPStatusCodesConfigValidation(t *testing.T) {
 				rw.WriteHeader(http.StatusOK)
 			})
 
-			_, err := New(t.Context(), next, test.config, &countingRetryListener{}, "traefikTest")
+			_, err := New(t.Context(), next, test.config, &countingRetryListener{}, "traefikTest", nil)
 
 			if test.expectError {
 				require.Error(t, err)
@@ -839,7 +839,7 @@ func TestRetryHTTPStatusCodesLargeBodyError(t *testing.T) {
 	})
 
 	retryListener := &countingRetryListener{}
-	retry, err := New(t.Context(), WrapHandler(next), config, retryListener, "traefikTest")
+	retry, err := New(t.Context(), WrapHandler(next), config, retryListener, "traefikTest", nil)
 	require.NoError(t, err)
 
 	recorder := httptest.NewRecorder()
@@ -878,7 +878,7 @@ func TestRetryDoesNotBufferBodyForNonIdempotentMethod(t *testing.T) {
 	})
 
 	retryListener := &countingRetryListener{}
-	retry, err := New(t.Context(), WrapHandler(next), config, retryListener, "traefikTest")
+	retry, err := New(t.Context(), WrapHandler(next), config, retryListener, "traefikTest", nil)
 	require.NoError(t, err)
 
 	recorder := httptest.NewRecorder()
@@ -942,7 +942,7 @@ func TestRetryWebsocketDelayedFlush(t *testing.T) {
 		},
 	}
 
-	handler, err := New(t.Context(), WrapHandler(proxy), dynamic.Retry{Attempts: 3}, &countingRetryListener{}, "traefikTest")
+	handler, err := New(t.Context(), WrapHandler(proxy), dynamic.Retry{Attempts: 3}, &countingRetryListener{}, "traefikTest", nil)
 	require.NoError(t, err)
 
 	retryServer := httptest.NewServer(handler)
